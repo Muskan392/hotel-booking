@@ -1,62 +1,46 @@
-import User from "../models/user.js";
-import { Webhook } from "svix";
+import { verifyWebhook } from '@clerk/express/webhooks';
+import User from '../models/user.js';
 
-const clerkwebhooks=async(req, res) => {
-    try{
-        const whook=new webhook(process.env.CLERK_WEBHOOK_SECRET);
+const clerkwebhooks = async (req, res) => {
+  try {
+    const event = await verifyWebhook(req);
+    const { type, data } = event;
 
-        const headers={
-            "svix-id": req.headers["svix-id"],
-            "svix-timestamp": req.headers["svix-timestamp"],
-            "svix-signature": req.headers["svix-signature"]
-        };
+    const clerkId = data.id;
+    const email = data.email_addresses?.[0]?.email_address || '';
+    const firstName = data.first_name || '';
+    const lastName = data.last_name || '';
+    const imageUrl = data.image_url || '';
 
-        //verify the webhook
-
-        await whook.verify(JSON.stringify(req.body), headers);
-        //getting data
-        const {data,type} = req.body;
-
-        const userData={
-            _id: data.id,
-            username: data.first_name + " " + data.last_name,
-            email: data.email_addresses[0].email_address,
-            image: data.image_url,
-           
-        }
-
-        //switch case for different webhook types
-        switch(type){
-            case "user.created":
-              await User.create(userData);
-             break;
-
-            case "user.updated":
-              
-                await User.findByIdAndUpdate(data.id, userData);
-                break;
-
-            case "user.deleted":
-               
-                await User.findByIdAndDelete(data.id);
-                break;
-
-            default:
-               break;
-        }
-        res.json({
-            success: true,message:"Webhook processed successfully"})
-
-    } catch(error){
-        console.log("Error processing webhook:", error.message);
-        res.json({
-            success: false,
-            message: "Error processing webhook",
-            error: error.message
-        });
-        
-
+    if (type==='user.created') {
+      await User.create({
+        clerkId,
+        email,
+        firstName,
+        lastName,
+        imageUrl
+      });
     }
-}
+
+    else if (type === 'user.updated') {
+      await User.findOneAndUpdate(
+        { clerkId },
+        { email, firstName, lastName, imageUrl },
+        { new: true }
+      );
+    }
+
+    else if (type === 'user.deleted') {
+      await User.findOneAndDelete({ clerkId });
+    }
+
+    return res.status(200).send('Webhook processed');
+
+  } 
+  catch (error) {
+    console.error('Webhook verification failed:', error.message);
+    return res.status(400).send('Invalid webhook');
+  }
+};
 
 export default clerkwebhooks;
